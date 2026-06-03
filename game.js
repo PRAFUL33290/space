@@ -4,6 +4,69 @@
 const W = 800, H = 600;
 const S = { MENU: 0, PLAYING: 1, PAUSED: 2, OVER: 3 };
 
+// ─── Gestionnaire Audio ───────────────────────────────────────────────────────
+const AudioMgr = (() => {
+    const tracks = {
+        menu:    new Audio('music/Menu.mp3'),
+        galactic: new Audio('music/Galactic Run.mp3'),
+        raid:    new Audio('music/Neon Star Raid.mp3'),
+    };
+    Object.values(tracks).forEach(t => { t.loop = true; t.volume = 0.5; });
+
+    let current = null;
+    let muted   = false;
+
+    function play(name) {
+        const t = tracks[name];
+        if (!t || current === t) return;
+        if (current) { current.pause(); current.currentTime = 0; }
+        current = t;
+        current.muted = muted;
+        current.play().catch(() => {});
+    }
+
+    function pause()  { current?.pause(); }
+    function resume() { current?.play().catch(() => {}); }
+
+    function toggleMute() {
+        muted = !muted;
+        if (current) current.muted = muted;
+        showMuteToast(muted);
+        return muted;
+    }
+
+    // Musique de jeu selon le niveau sélectionné
+    function gameTrack() { return selectedLevel <= 5 ? 'galactic' : 'raid'; }
+
+    return { play, pause, resume, toggleMute, gameTrack };
+})();
+
+// Premier clic/touche → démarre la musique du menu (règle autoplay navigateur)
+document.addEventListener('click',   startMenuAudio, { once: true });
+document.addEventListener('keydown', startMenuAudio, { once: true });
+function startMenuAudio() { AudioMgr.play('menu'); }
+
+// Toast discret pour l'état mute
+let _toastTimer = null;
+function showMuteToast(muted) {
+    let toast = document.getElementById('mute-toast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'mute-toast';
+        toast.style.cssText = `
+            position:absolute;bottom:14px;left:50%;transform:translateX(-50%);
+            background:rgba(0,0,0,0.75);color:#0ff;border:1px solid #0ff;
+            font-family:'Press Start 2P',monospace;font-size:10px;
+            padding:7px 14px;z-index:20;pointer-events:none;letter-spacing:1px;
+        `;
+        document.getElementById('game-container').appendChild(toast);
+    }
+    toast.innerText = muted ? '🔇 SON COUPÉ' : '🔊 SON ACTIVÉ';
+    toast.style.opacity = '1';
+    clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 1800);
+}
+
 // ─── Canvas ───────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('gameCanvas');
 const ctx    = canvas.getContext('2d');
@@ -18,6 +81,7 @@ document.addEventListener('keydown', e => {
         if      (state === S.PLAYING) pauseGame();
         else if (state === S.PAUSED)  resumeGame();
     }
+    if (e.code === 'KeyM') AudioMgr.toggleMute();
 });
 document.addEventListener('keyup', e => { keys[e.code] = false; });
 
@@ -346,6 +410,7 @@ function updateToggleBtn() {
 // ─── Pause / Reprise ──────────────────────────────────────────────────────────
 function pauseGame() {
     state = S.PAUSED;
+    AudioMgr.pause();
     const has2 = players.some(p => p.id === 2);
     pauseInfo.innerText = `NIVEAU ${level} · ${has2 ? '2 JOUEURS' : '1 JOUEUR'}`;
     updateToggleBtn();
@@ -354,6 +419,7 @@ function pauseGame() {
 
 function resumeGame() {
     state = S.PLAYING;
+    AudioMgr.resume();
     lastTime = performance.now(); // évite un saut de temps après la pause
     pauseEl.classList.add('hidden');
 }
@@ -385,6 +451,7 @@ function startGame(coop) {
     levelEl.innerText = `LEVEL ${level}`;
 
     updateHUD();
+    AudioMgr.play(AudioMgr.gameTrack());
     state = S.PLAYING;
     lastTime = performance.now();
 }
@@ -396,6 +463,7 @@ function goToMenu() {
     pauseEl.classList.add('hidden');
     overEl.classList.add('hidden');
     menuEl.classList.remove('hidden');
+    AudioMgr.play('menu');
 }
 
 function triggerGameOver() {
@@ -404,6 +472,7 @@ function triggerGameOver() {
     finalScEl.innerText = total.toLocaleString('fr-FR');
     hudEl.classList.add('hidden');
     overEl.classList.remove('hidden');
+    AudioMgr.play('menu'); // retour à la musique du menu sur Game Over
 }
 
 // ─── Collisions ───────────────────────────────────────────────────────────────
