@@ -1,0 +1,207 @@
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background-color: #050510;
+    color: #fff;
+    font-family: 'Press Start 2P', monospace;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    overflow: hidden;
+}
+
+#game-container {
+    position: relative;
+    width: 800px;
+    height: 600px;
+    box-shadow: 0 0 20px rgba(0, 255, 255, 0.2);
+    border: 2px solid #333;
+}
+
+canvas {
+    display: block;
+    background: #000;
+}
+
+/* UI Overlays */
+.overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.85);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    z-index: 10;
+}
+
+.overlay.hidden {
+    display: none;
+}
+
+h1 {
+    font-size: 48px;
+    color: #0ff;
+    text-shadow: 0 0 10px #0ff, 0 0 20px #0ff;
+    margin-bottom: 40px;
+    line-height: 1.5;
+}
+
+h2 {
+    font-size: 36px;
+    color: #f00;
+    text-shadow: 0 0 10px #f00;
+    margin-bottom: 20px;
+}
+
+button {
+    background: transparent;
+    border: 2px solid #0ff;
+    color: #0ff;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 18px;
+    padding: 14px 28px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-transform: uppercase;
+    width: 260px;
+}
+
+button:hover {
+    background: #0ff;
+    color: #000;
+    box-shadow: 0 0 18px #0ff;
+}
+
+.menu-btns {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-bottom: 30px;
+}
+
+.controls-info {
+    margin-top: 10px;
+    font-size: 10px;
+    color: #888;
+}
+
+.score-final {
+    font-size: 13px;
+    color: #aaa;
+    margin-bottom: 30px;
+}
+
+/* Sélecteur de niveau */
+.level-selector {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    margin-bottom: 28px;
+}
+
+.level-name {
+    text-align: center;
+    min-width: 80px;
+}
+
+.level-label {
+    font-size: 9px;
+    color: #888;
+    margin-bottom: 6px;
+}
+
+#level-select-num {
+    font-size: 34px;
+    color: #ff0;
+    text-shadow: 0 0 12px #ff0, 0 0 24px #ff0;
+}
+
+.arrow-btn {
+    width: 48px !important;
+    padding: 12px 0 !important;
+    font-size: 16px !important;
+    min-width: unset !important;
+}
+
+/* Menu Pause */
+.title-pause {
+    color: #0ff !important;
+    text-shadow: 0 0 10px #0ff !important;
+}
+
+.pause-info {
+    font-size: 10px;
+    color: #888;
+    margin-bottom: 24px;
+    letter-spacing: 1px;
+}
+
+/* HUD */
+#hud {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    padding: 15px;
+    display: flex;
+    justify-content: space-between;
+    pointer-events: none;
+    z-index: 5;
+}
+
+#hud.hidden {
+    display: none;
+}
+
+.player-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+#p1-stats {
+    align-items: flex-start;
+    color: #0fa;
+}
+
+#p2-stats {
+    align-items: flex-end;
+    color: #f0a;
+}
+
+.player-label {
+    font-size: 12px;
+    opacity: 0.8;
+}
+
+.lives {
+    font-size: 16px;
+    letter-spacing: 2px;
+}
+
+.score {
+    font-size: 14px;
+}
+
+#center-stats {
+    display: flex;
+    align-items: flex-start;
+}
+
+#level-display {
+    font-size: 16px;
+    color: #fff;
+    text-shadow: 0 0 5px #fff;
+}
