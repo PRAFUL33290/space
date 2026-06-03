@@ -37,8 +37,9 @@ const AudioMgr = (() => {
     return { play, pause, resume, toggleMute, gameTrack };
 })();
 
-document.addEventListener('click',   startMenuAudio, { once: true });
-document.addEventListener('keydown', startMenuAudio, { once: true });
+document.addEventListener('click',      startMenuAudio, { once: true });
+document.addEventListener('keydown',    startMenuAudio, { once: true });
+document.addEventListener('touchstart', startMenuAudio, { once: true });
 function startMenuAudio() { AudioMgr.play('menu'); }
 
 let _toastTimer = null;
@@ -67,6 +68,17 @@ const SFX = (() => {
         if (actx.state === 'suspended') actx.resume();
         return actx;
     }
+
+    // Unlock AudioContext on any user interaction (critical for mobile)
+    function unlockAudio() {
+        getCtx();
+        // Also unlock HTML audio elements for mobile
+        Object.values({ menu: 'music/Menu.mp3', galactic: 'music/Galactic Run.mp3', raid: 'music/Neon Star Raid.mp3' })
+            .forEach(() => {});
+    }
+    ['touchstart', 'touchend', 'mousedown', 'click', 'keydown'].forEach(evt => {
+        document.addEventListener(evt, unlockAudio, { once: false, passive: true });
+    });
 
     function shoot(type) {
         // type: 'normal', 'medium', 'plasma'
@@ -177,6 +189,8 @@ const ctx    = canvas.getContext('2d');
 
 // ─── Inputs ───────────────────────────────────────────────────────────────────
 const keys = {};
+const touchState = { up: false, down: false, left: false, right: false, fire: false, shield: false };
+
 document.addEventListener('keydown', e => {
     keys[e.code] = true;
     if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Enter'].includes(e.code))
@@ -186,8 +200,66 @@ document.addEventListener('keydown', e => {
         else if (state === S.PAUSED)  resumeGame();
     }
     if (e.code === 'KeyM') AudioMgr.toggleMute();
+    // Shield activation keys
+    if (e.code === 'KeyE') activateShield(1);
+    if (e.code === 'ShiftRight' || e.code === 'ShiftLeft') activateShield(2);
 });
 document.addEventListener('keyup', e => { keys[e.code] = false; });
+
+// ─── Shield activation (protection mode) ─────────────────────────────────────
+function activateShield(playerId) {
+    const p = players.find(pl => pl.id === playerId && pl.active);
+    if (!p) return;
+    // Only activate if no active power-up and shield cooldown is ready
+    if (p.powerType || p.shieldCooldown > 0) return;
+    p.shield = 2;
+    p.shieldCooldown = 20; // 20s cooldown before next manual shield
+    boom(p.x, p.y, '#4488ff', 8);
+    SFX.powerUp();
+    updatePowerHUD(p);
+}
+
+// ─── Mobile Touch Controls ────────────────────────────────────────────────────
+(function initMobileControls() {
+    const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    if (!isMobile) return;
+
+    function handleDpad(e) {
+        e.preventDefault();
+        const dir = e.currentTarget.dataset.dir;
+        if (dir) touchState[dir] = (e.type === 'touchstart' || e.type === 'touchmove');
+    }
+
+    function handleDpadEnd(e) {
+        e.preventDefault();
+        const dir = e.currentTarget.dataset.dir;
+        if (dir) touchState[dir] = false;
+    }
+
+    document.querySelectorAll('.dpad-btn').forEach(btn => {
+        btn.addEventListener('touchstart', handleDpad, { passive: false });
+        btn.addEventListener('touchend', handleDpadEnd, { passive: false });
+        btn.addEventListener('touchcancel', handleDpadEnd, { passive: false });
+    });
+
+    const fireBtn = document.getElementById('btn-fire');
+    if (fireBtn) {
+        fireBtn.addEventListener('touchstart', e => { e.preventDefault(); touchState.fire = true; }, { passive: false });
+        fireBtn.addEventListener('touchend', e => { e.preventDefault(); touchState.fire = false; }, { passive: false });
+        fireBtn.addEventListener('touchcancel', e => { e.preventDefault(); touchState.fire = false; }, { passive: false });
+    }
+
+    const shieldBtn = document.getElementById('btn-shield-mobile');
+    if (shieldBtn) {
+        shieldBtn.addEventListener('touchstart', e => {
+            e.preventDefault();
+            touchState.shield = true;
+            activateShield(1);
+        }, { passive: false });
+        shieldBtn.addEventListener('touchend', e => { e.preventDefault(); touchState.shield = false; }, { passive: false });
+        shieldBtn.addEventListener('touchcancel', e => { e.preventDefault(); touchState.shield = false; }, { passive: false });
+    }
+})();
 
 // ─── État global ──────────────────────────────────────────────────────────────
 let state         = S.MENU;
@@ -252,24 +324,31 @@ class Player extends Entity {
         this.powerTime  = 0;       // secondes restantes
         this.dmgMult    = 1;       // multiplicateur de dégâts
         this.shield     = 0;       // bouclier : coups absorbés
+        this.shieldCooldown = 0;   // cooldown for manual shield activation
     }
 
     update(dt) {
         if (!this.active) return;
         if (this.invt > 0) this.invt -= dt;
         if (this.cd   > 0) this.cd   -= dt;
+        if (this.shieldCooldown > 0) this.shieldCooldown -= dt;
 
-        // Déplacements
+        // Déplacements (keyboard + touch for P1)
         const c = this.ctrl;
-        if (keys[c.up])    this.y -= this.spd * dt;
-        if (keys[c.down])  this.y += this.spd * dt;
-        if (keys[c.left])  this.x -= this.spd * dt;
-        if (keys[c.right]) this.x += this.spd * dt;
+        const moveUp    = keys[c.up]    || (this.id === 1 && touchState.up);
+        const moveDown  = keys[c.down]  || (this.id === 1 && touchState.down);
+        const moveLeft  = keys[c.left]  || (this.id === 1 && touchState.left);
+        const moveRight = keys[c.right] || (this.id === 1 && touchState.right);
+
+        if (moveUp)    this.y -= this.spd * dt;
+        if (moveDown)  this.y += this.spd * dt;
+        if (moveLeft)  this.x -= this.spd * dt;
+        if (moveRight) this.x += this.spd * dt;
         this.x = Math.max(this.w/2, Math.min(W * 0.58, this.x));
         this.y = Math.max(this.h/2, Math.min(H - this.h/2, this.y));
 
         // ── Logique de tir chargé ─────────────────────────────────────────
-        const shooting = !!keys[c.shoot];
+        const shooting = !!(keys[c.shoot] || (this.id === 1 && touchState.fire));
         if (shooting) {
             this.chargeTime = Math.min(this.chargeTime + dt, CHARGE_MAX);
         } else if (this.wasShoot && this.cd <= 0) {
@@ -627,6 +706,9 @@ function updatePowerHUD(p) {
     } else if (p.shield > 0) {
         el.innerText = `🛡 x${p.shield}`;
         el.style.color = '#4488ff';
+    } else if (p.shieldCooldown > 0) {
+        el.innerText = `🛡 ${Math.ceil(p.shieldCooldown)}s`;
+        el.style.color = '#555';
     } else {
         el.innerText = '';
     }
