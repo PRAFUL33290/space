@@ -2,7 +2,7 @@
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 const W = 800, H = 600;
-const S = { MENU: 0, PLAYING: 1, PAUSED: 2, OVER: 3 };
+const S = { MENU: 0, PLAYING: 1, PAUSED: 2, OVER: 3, VICTORY: 4 };
 
 const CHARGE_MED  = 0.35;  // seuil tir moyen (s)
 const CHARGE_FULL = 0.90;  // seuil tir plasma (s)
@@ -274,6 +274,11 @@ let projectiles = [];
 let enemies     = [];
 let particles   = [];
 let powerups    = [];   // ← bonus à ramasser
+let boss        = null; // boss actuel (null si absent)
+let levelTimer  = 0;    // temps écoulé dans le niveau courant (secondes)
+let bossSpawned = false; // boss déjà apparu dans ce niveau
+
+const LEVEL_DURATION = 300; // 5 minutes par niveau avant le boss
 
 // ─── Étoiles parallaxe ────────────────────────────────────────────────────────
 const STAR_LAYERS = [
@@ -527,6 +532,50 @@ class Shot extends Entity {
     }
 }
 
+// ─── Missile à tête chercheuse ────────────────────────────────────────────────
+class HomingShot extends Shot {
+    constructor(x, y, col, target, spd) {
+        const ang = Math.atan2(target.y - y, target.x - x);
+        super(x, y, Math.cos(ang) * spd, Math.sin(ang) * spd, col, false);
+        this.w = 14; this.h = 6;
+        this.target     = target;
+        this.homingTime = 2.8;  // poursuite pendant 2.8s puis trajectoire droite
+        this.turnRate   = 2.8;  // rad/s de virage max
+    }
+
+    update(dt) {
+        if (this.homingTime > 0 && this.target && this.target.active) {
+            this.homingTime -= dt;
+            const ang     = Math.atan2(this.target.y - this.y, this.target.x - this.x);
+            const curAng  = Math.atan2(this.vy, this.vx);
+            const diff    = Math.atan2(Math.sin(ang - curAng), Math.cos(ang - curAng));
+            const turn    = Math.sign(diff) * Math.min(Math.abs(diff), this.turnRate * dt);
+            const spd     = Math.hypot(this.vx, this.vy);
+            const newAng  = curAng + turn;
+            this.vx = Math.cos(newAng) * spd;
+            this.vy = Math.sin(newAng) * spd;
+        }
+        super.update(dt);
+    }
+
+    draw() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(Math.atan2(this.vy, this.vx));
+        ctx.shadowBlur = 14; ctx.shadowColor = this.col;
+        ctx.fillStyle = this.col;
+        ctx.beginPath();
+        ctx.moveTo( this.w / 2,  0);
+        ctx.lineTo(-this.w / 2, -this.h / 2);
+        ctx.lineTo(-this.w / 3,  0);
+        ctx.lineTo(-this.w / 2,  this.h / 2);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.shadowBlur = 4;
+        ctx.beginPath(); ctx.arc(this.w / 4, 0, 2.5, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+    }
+}
+
 // ─── Ennemis ──────────────────────────────────────────────────────────────────
 const EDEFS = {
     scout:   { col: '#ff3333', maxHp: 1, val: 100, w: 26, h: 20, spd: 130, shoots: false, dropChance: 0.06 },
@@ -583,6 +632,257 @@ class Enemy extends Entity {
             ctx.fillStyle = hp > maxHp/2 ? '#33ff66' : '#ff4400';
             ctx.fillRect(-bw/2, -h/2-9, bw * (hp/maxHp), 4);
         }
+        ctx.restore();
+    }
+}
+
+// ─── Définitions des 10 Boss ──────────────────────────────────────────────────
+// pattern: 'single' | 'double' | 'spread3' | 'spread5' | 'homing' |
+//          'triple_lane' | 'burst8' | 'circle12' | 'omega'
+const BOSS_DEFS = [
+    // Niv 1 – SENTINEL : tir unique, lent
+    { name:'SENTINEL',       col:'#ff5555', maxHp:  60, spd: 42, w: 80, h: 60, val:  5000, fireInterval:2.6, pattern:'single',      bulletSpd:170 },
+    // Niv 2 – VIPER : double tir légèrement écarté
+    { name:'VIPER',          col:'#ff8833', maxHp: 130, spd: 54, w: 88, h: 64, val:  9000, fireInterval:2.1, pattern:'double',      bulletSpd:190 },
+    // Niv 3 – DREADNOUGHT : éventail 3 balles
+    { name:'DREADNOUGHT',    col:'#ffcc00', maxHp: 220, spd: 62, w: 96, h: 70, val: 14000, fireInterval:1.8, pattern:'spread3',     bulletSpd:205 },
+    // Niv 4 – PHANTOM : éventail 5 + téléportation verticale
+    { name:'PHANTOM',        col:'#cc44ff', maxHp: 320, spd: 70, w:100, h: 72, val: 20000, fireInterval:1.55,pattern:'spread5',     bulletSpd:218, teleports:true },
+    // Niv 5 – HYDRA : éventail 3 + invoque des chasseurs
+    { name:'HYDRA',          col:'#00ccff', maxHp: 430, spd: 74, w:108, h: 78, val: 27000, fireInterval:1.35,pattern:'spread3',     bulletSpd:228, spawnsMinions:true },
+    // Niv 6 – STORM : missiles à tête chercheuse
+    { name:'STORM',          col:'#00ff88', maxHp: 560, spd: 82, w:112, h: 82, val: 36000, fireInterval:1.15,pattern:'homing',      bulletSpd:198 },
+    // Niv 7 – COLOSSUS : 3 lignes de tir horizontales ciblées
+    { name:'COLOSSUS',       col:'#ff2266', maxHp: 700, spd: 90, w:118, h: 86, val: 46000, fireInterval:0.9, pattern:'triple_lane', bulletSpd:248 },
+    // Niv 8 – VOID REAPER : 8 balles radiales + tir ciblé + phase bouclier
+    { name:'VOID REAPER',    col:'#bb00ff', maxHp: 860, spd: 98, w:124, h: 90, val: 60000, fireInterval:1.8, pattern:'burst8',      bulletSpd:222, hasShieldPhase:true },
+    // Niv 9 – NEBULA TITAN : couronne de 12 balles rotative + ciblé
+    { name:'NEBULA TITAN',   col:'#ff44aa', maxHp:1050, spd:110, w:132, h: 96, val: 78000, fireInterval:1.2, pattern:'circle12',    bulletSpd:238 },
+    // Niv 10 – OMEGA DESTROYER : tout combiné + bouclier + renforts
+    { name:'OMEGA DESTROYER',col:'#e8e8ff', maxHp:1400, spd:120, w:142, h:102, val:160000, fireInterval:0.65,pattern:'omega',       bulletSpd:258, hasShieldPhase:true, spawnsMinions:true },
+];
+
+class Boss extends Entity {
+    constructor(lvl) {
+        const d = BOSS_DEFS[lvl - 1];
+        super(W + d.w, H / 2, d.w, d.h);
+        Object.assign(this, d);
+        this.hp          = d.maxHp;
+        this.targetX     = W - d.w / 2 - 18;
+        this.scd         = d.fireInterval;
+        this.vy          = d.spd;
+        this.phase       = 1;           // 1 ou 2
+        this.shielded    = false;
+        this.shieldTimer = 0;
+        this.entering    = true;
+        this.angle       = 0;           // rotation pour les patterns circulaires
+        this.minionTimer = (d.spawnsMinions) ? 10 : Infinity;
+        this.teleportTimer = (d.teleports)   ?  8 : Infinity;
+    }
+
+    update(dt) {
+        this.angle += dt * 1.4;
+
+        // Entrée en scène depuis la droite
+        if (this.entering) {
+            this.x -= 140 * dt;
+            if (this.x <= this.targetX) { this.x = this.targetX; this.entering = false; }
+            return;
+        }
+
+        // Transition phase 2 (à 50 % des PV)
+        if (this.phase === 1 && this.hp <= this.maxHp * 0.5) {
+            this.phase = 2;
+            this.fireInterval = Math.max(0.28, this.fireInterval * 0.52);
+            this.scd = this.fireInterval;
+            boom(this.x, this.y, this.col, 35);
+            if (this.hasShieldPhase) { this.shielded = true; this.shieldTimer = 4; }
+        }
+
+        // Phase bouclier temporaire
+        if (this.shielded) {
+            this.shieldTimer -= dt;
+            if (this.shieldTimer <= 0) this.shielded = false;
+        }
+
+        // Mouvement vertical (rebond)
+        this.y += this.vy * dt;
+        if (this.y <= this.h / 2 || this.y >= H - this.h / 2) this.vy *= -1;
+        this.y = Math.max(this.h / 2, Math.min(H - this.h / 2, this.y));
+
+        // Téléportation (Phantom)
+        if (this.teleports) {
+            this.teleportTimer -= dt;
+            if (this.teleportTimer <= 0) {
+                boom(this.x, this.y, this.col, 14);
+                this.y = 60 + Math.random() * (H - 120);
+                boom(this.x, this.y, this.col, 14);
+                this.teleportTimer = 4.5 + Math.random() * 4;
+            }
+        }
+
+        // Invocation de renforts
+        if (this.spawnsMinions) {
+            this.minionTimer -= dt;
+            if (this.minionTimer <= 0) {
+                const n = this.phase === 2 ? 3 : 2;
+                for (let i = 0; i < n; i++) {
+                    enemies.push(new Enemy(W + 40, 60 + Math.random() * (H - 120), 'fighter', (level - 1) * 12));
+                }
+                this.minionTimer = this.phase === 2 ? 6 : 10;
+            }
+        }
+
+        // Tir
+        this.scd -= dt;
+        if (this.scd <= 0 && !this.entering) {
+            this._shoot();
+            this.scd = this.fireInterval;
+        }
+    }
+
+    _shoot() {
+        const target = players.find(p => p.active);
+        if (!target) return;
+        const bx  = this.x - this.w / 2;
+        const by  = this.y;
+        const spd = this.bulletSpd * (this.phase === 2 ? 1.25 : 1);
+        const col = this.col;
+
+        switch (this.pattern) {
+            case 'single': {
+                const a = Math.atan2(target.y - by, target.x - bx);
+                projectiles.push(new Shot(bx, by, Math.cos(a)*spd, Math.sin(a)*spd, col, false));
+                break;
+            }
+            case 'double': {
+                const a = Math.atan2(target.y - by, target.x - bx);
+                [-0.18, 0.18].forEach(off =>
+                    projectiles.push(new Shot(bx, by, Math.cos(a+off)*spd, Math.sin(a+off)*spd, col, false)));
+                break;
+            }
+            case 'spread3': {
+                const a = Math.atan2(target.y - by, target.x - bx);
+                [-0.35, 0, 0.35].forEach(off =>
+                    projectiles.push(new Shot(bx, by, Math.cos(a+off)*spd, Math.sin(a+off)*spd, col, false)));
+                break;
+            }
+            case 'spread5': {
+                const a = Math.atan2(target.y - by, target.x - bx);
+                [-0.5, -0.25, 0, 0.25, 0.5].forEach(off =>
+                    projectiles.push(new Shot(bx, by, Math.cos(a+off)*spd, Math.sin(a+off)*spd, col, false)));
+                break;
+            }
+            case 'homing': {
+                const count = this.phase === 2 ? 2 : 1;
+                for (let i = 0; i < count; i++)
+                    projectiles.push(new HomingShot(bx, by - (i - (count-1)/2) * 24, col, target, spd));
+                break;
+            }
+            case 'triple_lane': {
+                [H * 0.22, H * 0.5, H * 0.78].forEach(ty => {
+                    const a = Math.atan2(ty - by, target.x - bx);
+                    projectiles.push(new Shot(bx, by, Math.cos(a)*spd, Math.sin(a)*spd, col, false));
+                });
+                break;
+            }
+            case 'burst8': {
+                for (let i = 0; i < 8; i++) {
+                    const a = (i / 8) * Math.PI * 2;
+                    projectiles.push(new Shot(bx, by, Math.cos(a)*spd*0.72, Math.sin(a)*spd*0.72, col, false));
+                }
+                const a = Math.atan2(target.y - by, target.x - bx);
+                projectiles.push(new Shot(bx, by, Math.cos(a)*spd, Math.sin(a)*spd, col, false));
+                break;
+            }
+            case 'circle12': {
+                for (let i = 0; i < 12; i++) {
+                    const a = (i / 12) * Math.PI * 2 + this.angle;
+                    projectiles.push(new Shot(bx, by, Math.cos(a)*spd*0.78, Math.sin(a)*spd*0.78, col, false));
+                }
+                const aimed = Math.atan2(target.y - by, target.x - bx);
+                projectiles.push(new Shot(bx, by, Math.cos(aimed)*spd, Math.sin(aimed)*spd, col, false));
+                break;
+            }
+            case 'omega': {
+                // Couronne de 8 balles
+                for (let i = 0; i < 8; i++) {
+                    const a = (i / 8) * Math.PI * 2 + this.angle;
+                    projectiles.push(new Shot(bx, by, Math.cos(a)*spd*0.7, Math.sin(a)*spd*0.7, col, false));
+                }
+                // Éventail de 3 balles ciblées
+                const aimed = Math.atan2(target.y - by, target.x - bx);
+                [-0.28, 0, 0.28].forEach(off =>
+                    projectiles.push(new Shot(bx, by, Math.cos(aimed+off)*spd, Math.sin(aimed+off)*spd, col, false)));
+                // Missile à tête chercheuse
+                projectiles.push(new HomingShot(bx, by, '#ff0088', target, spd * 0.88));
+                break;
+            }
+        }
+    }
+
+    draw() {
+        if (!this.active) return;
+        const { x, y, w, h, col, phase } = this;
+        ctx.save();
+        ctx.translate(x, y);
+
+        // Aura du bouclier temporaire
+        if (this.shielded) {
+            const pulse = 0.5 + 0.5 * Math.sin(performance.now() * 0.009);
+            ctx.strokeStyle = `rgba(200,80,255,${pulse})`;
+            ctx.lineWidth = 7;
+            ctx.shadowBlur = 35; ctx.shadowColor = '#cc44ff';
+            ctx.beginPath(); ctx.arc(0, 0, w * 0.68, 0, Math.PI * 2); ctx.stroke();
+        }
+
+        ctx.shadowBlur  = phase === 2 ? 44 : 24;
+        ctx.shadowColor = col;
+
+        // Coque principale (vaisseau orienté vers la gauche)
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.moveTo( w/2,   0);
+        ctx.lineTo( w/5,  -h/2);
+        ctx.lineTo(-w/3,  -h/2);
+        ctx.lineTo(-w/2,  -h/4);
+        ctx.lineTo(-w/2 + 10, 0);
+        ctx.lineTo(-w/2,   h/4);
+        ctx.lineTo(-w/3,   h/2);
+        ctx.lineTo( w/5,   h/2);
+        ctx.closePath(); ctx.fill();
+
+        // Détail sombre central
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.beginPath();
+        ctx.moveTo(-w/6, -h/3); ctx.lineTo(w/4, 0); ctx.lineTo(-w/6, h/3);
+        ctx.closePath(); ctx.fill();
+
+        // Canon avant
+        ctx.fillStyle = 'rgba(255,255,255,0.75)';
+        ctx.shadowBlur = 10; ctx.shadowColor = col;
+        ctx.fillRect(w/4, -5, w/4, 10);
+
+        // Flammes moteur
+        const fLen = 14 + Math.random() * 12;
+        ctx.fillStyle = phase === 2 ? '#ff2200' : '#ff8800';
+        ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 16;
+        ctx.beginPath();
+        ctx.moveTo(-w/2 + 10, -h/5); ctx.lineTo(-w/2 + 10 - fLen, 0); ctx.lineTo(-w/2 + 10, h/5);
+        ctx.fill();
+
+        // Flammes supplémentaires en phase 2
+        if (phase === 2) {
+            const f2 = 8 + Math.random() * 8;
+            ctx.fillStyle = '#ff4400'; ctx.shadowColor = '#ff4400';
+            ctx.beginPath();
+            ctx.moveTo(-w/3, -h/2 + 8); ctx.lineTo(-w/3 - f2, -h/2 + 8); ctx.lineTo(-w/3, -h/2 + 18);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(-w/3, h/2 - 8); ctx.lineTo(-w/3 - f2, h/2 - 8); ctx.lineTo(-w/3, h/2 - 18);
+            ctx.fill();
+        }
+
         ctx.restore();
     }
 }
@@ -673,20 +973,25 @@ function boom(x, y, col, n) {
 }
 
 // ─── DOM ──────────────────────────────────────────────────────────────────────
-const menuEl    = document.getElementById('main-menu');
-const overEl    = document.getElementById('game-over');
-const pauseEl   = document.getElementById('pause-menu');
-const hudEl     = document.getElementById('hud');
-const p2Stats   = document.getElementById('p2-stats');
-const levelEl   = document.getElementById('level-display');
-const p1ScEl    = document.getElementById('p1-score');
-const p2ScEl    = document.getElementById('p2-score');
-const p1LvEl    = document.getElementById('p1-lives');
-const p2LvEl    = document.getElementById('p2-lives');
-const finalScEl = document.getElementById('final-score');
-const lvlNumEl  = document.getElementById('level-select-num');
-const pauseInfo = document.getElementById('pause-info');
-const btnToggle = document.getElementById('btn-toggle-mode');
+const menuEl       = document.getElementById('main-menu');
+const overEl       = document.getElementById('game-over');
+const victoryEl    = document.getElementById('victory');
+const pauseEl      = document.getElementById('pause-menu');
+const hudEl        = document.getElementById('hud');
+const p2Stats      = document.getElementById('p2-stats');
+const levelEl      = document.getElementById('level-display');
+const p1ScEl       = document.getElementById('p1-score');
+const p2ScEl       = document.getElementById('p2-score');
+const p1LvEl       = document.getElementById('p1-lives');
+const p2LvEl       = document.getElementById('p2-lives');
+const finalScEl    = document.getElementById('final-score');
+const victorySc    = document.getElementById('victory-score');
+const lvlNumEl     = document.getElementById('level-select-num');
+const pauseInfo    = document.getElementById('pause-info');
+const btnToggle    = document.getElementById('btn-toggle-mode');
+const bossBarEl    = document.getElementById('boss-bar-container');
+const bossNameEl   = document.getElementById('boss-name-display');
+const bossHpInner  = document.getElementById('boss-hp-inner');
 
 function updateHUD() {
     players.forEach(p => {
@@ -719,6 +1024,80 @@ function updateToggleBtn() {
     btnToggle.textContent = has2 ? '👤 PASSER EN 1 JOUEUR' : '👥 PASSER EN 2 JOUEURS';
 }
 
+function updateBossHUD() {
+    if (boss && boss.active && !boss.entering) {
+        bossNameEl.innerText = boss.name;
+        const ratio = Math.max(0, boss.hp / boss.maxHp);
+        bossHpInner.style.width = (ratio * 100) + '%';
+        const hpCol = ratio > 0.5 ? '#33ff66' : ratio > 0.25 ? '#ffaa00' : '#ff3333';
+        bossHpInner.style.background = hpCol;
+        bossHpInner.style.boxShadow  = `0 0 8px ${hpCol}`;
+        bossBarEl.classList.remove('hidden');
+    } else {
+        bossBarEl.classList.add('hidden');
+    }
+}
+
+// ─── Boss : spawn / mort / progression de niveau ──────────────────────────────
+function _showCentreToast(text, col, dur) {
+    let t = document.getElementById('centre-toast');
+    if (!t) {
+        t = document.createElement('div'); t.id = 'centre-toast';
+        t.style.cssText = `position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+            background:rgba(0,0,0,.92);border:2px solid currentColor;
+            font-family:'Press Start 2P',monospace;font-size:14px;letter-spacing:2px;
+            padding:14px 24px;z-index:25;pointer-events:none;text-align:center;
+            transition:opacity .4s;`;
+        document.getElementById('game-container').appendChild(t);
+    }
+    t.style.color = col; t.style.borderColor = col;
+    t.style.textShadow = `0 0 10px ${col}`;
+    t.innerText = text; t.style.opacity = '1';
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => { t.style.opacity = '0'; }, dur);
+}
+
+function spawnBoss() {
+    if (bossSpawned) return;
+    bossSpawned = true;
+    enemies = []; // on vide les ennemis courants
+    boss = new Boss(level);
+    _showCentreToast(`⚠ ${BOSS_DEFS[level-1].name} ⚠`, '#ff3333', 3000);
+    SFX.playerHit(); // son d'alerte
+}
+
+function onBossDied() {
+    const totalScore = players.reduce((s, p) => s + p.score, 0);
+    boom(boss.x, boss.y, boss.col, 80);
+    boom(boss.x, boss.y, '#fff', 30);
+    SFX.enemyDestroyed();
+    boss = null;
+    updateBossHUD();
+
+    if (level >= 10) {
+        setTimeout(triggerVictory, 1800);
+    } else {
+        _showCentreToast(`✦ NIVEAU ${level} TERMINÉ ✦`, '#00ff88', 2800);
+        setTimeout(() => {
+            level++;
+            levelTimer  = 0;
+            bossSpawned = false;
+            enemies     = [];
+            levelEl.innerText = `LEVEL ${level}`;
+            AudioMgr.play(level <= 5 ? 'galactic' : 'raid');
+        }, 2800);
+    }
+}
+
+function triggerVictory() {
+    state = S.VICTORY;
+    const total = players.reduce((s, p) => s + p.score, 0);
+    victorySc.innerText = total.toLocaleString('fr-FR');
+    hudEl.classList.add('hidden');
+    victoryEl.classList.remove('hidden');
+    AudioMgr.play('menu');
+}
+
 // ─── Pause / Reprise ──────────────────────────────────────────────────────────
 function pauseGame() {
     state = S.PAUSED; AudioMgr.pause();
@@ -744,8 +1123,10 @@ function startGame(coop) {
             { up:'ArrowUp', down:'ArrowDown', left:'ArrowLeft', right:'ArrowRight', shoot:'Enter' }, 2)
     );
     projectiles = []; enemies = []; particles = []; powerups = [];
+    boss = null; levelTimer = 0; bossSpawned = false;
     spawnTimer = 0;
-    menuEl.classList.add('hidden'); overEl.classList.add('hidden'); pauseEl.classList.add('hidden');
+    menuEl.classList.add('hidden'); overEl.classList.add('hidden');
+    pauseEl.classList.add('hidden'); victoryEl.classList.add('hidden');
     hudEl.classList.remove('hidden');
     p2Stats.style.display = coop ? '' : 'none';
     levelEl.innerText = `LEVEL ${level}`;
@@ -755,14 +1136,19 @@ function startGame(coop) {
 }
 
 function goToMenu() {
-    state = S.MENU; players = []; enemies = []; projectiles = []; particles = []; powerups = [];
+    state = S.MENU;
+    players = []; enemies = []; projectiles = []; particles = []; powerups = [];
+    boss = null; levelTimer = 0; bossSpawned = false;
     hudEl.classList.add('hidden'); pauseEl.classList.add('hidden');
-    overEl.classList.add('hidden'); menuEl.classList.remove('hidden');
+    overEl.classList.add('hidden'); victoryEl.classList.add('hidden');
+    menuEl.classList.remove('hidden');
+    bossBarEl.classList.add('hidden');
     AudioMgr.play('menu');
 }
 
 function triggerGameOver() {
     state = S.OVER;
+    boss = null; bossBarEl.classList.add('hidden');
     finalScEl.innerText = players.reduce((s,p)=>s+p.score,0).toLocaleString('fr-FR');
     hudEl.classList.add('hidden'); overEl.classList.remove('hidden');
     AudioMgr.play('menu');
@@ -794,6 +1180,24 @@ function collide() {
                 if (!proj.active) break;
             }
         }
+
+        // Tirs joueurs → boss
+        if (proj.active && boss && boss.active && !boss.entering && !boss.shielded) {
+            if (proj.hits(boss)) {
+                boom(proj.x, proj.y, proj.col, proj.damage > 1 ? 10 : 5);
+                if (!proj.piercing) proj.active = false;
+                boss.hp -= proj.damage;
+                updateBossHUD();
+                if (boss.hp <= 0) {
+                    boss.active = false;
+                    const shooter = players.find(p => p.id === proj.pid);
+                    if (shooter) { shooter.score += boss.val; updateHUD(); }
+                    onBossDied();
+                } else {
+                    SFX.impact();
+                }
+            }
+        }
     }
 
     // Tirs / corps ennemis → joueurs
@@ -807,6 +1211,8 @@ function collide() {
             if (!e.active) continue;
             if (e.hits(player)) { e.active = false; boom(e.x,e.y,e.col,18); player.hit(); }
         }
+        // Corps du boss → joueur
+        if (boss && boss.active && !boss.entering && boss.hits(player)) { player.hit(); }
         // Collecte de power-up
         for (const pu of powerups) {
             if (!pu.active) continue;
@@ -837,6 +1243,7 @@ function showPowerToast(pu) {
 
 // ─── Spawn ennemis depuis la DROITE ───────────────────────────────────────────
 function spawnEnemies(dt) {
+    if (boss) return; // pas de spawn normal pendant le combat de boss
     spawnTimer -= dt; if (spawnTimer > 0) return;
     const y = 40 + Math.random() * (H - 80), r = Math.random();
     const heavyCut = Math.max(0.75, 0.95 - level*0.025);
@@ -857,8 +1264,23 @@ function update(dt) {
         enemies.forEach(e => e.update(dt));
         particles.forEach(p => p.update(dt));
         powerups.forEach(pu => pu.update(dt));
+
+        // Mise à jour du boss
+        if (boss) {
+            boss.update(dt);
+            if (!boss.active) boss = null;
+        }
+        updateBossHUD();
+
         collide();
         spawnEnemies(dt);
+
+        // Chronomètre de niveau : lance le boss après LEVEL_DURATION secondes
+        if (!bossSpawned) {
+            levelTimer += dt;
+            if (levelTimer >= LEVEL_DURATION) spawnBoss();
+        }
+
         projectiles = projectiles.filter(p => p.active);
         enemies     = enemies.filter(e => e.active);
         particles   = particles.filter(p => p.active);
@@ -875,6 +1297,7 @@ function draw() {
         powerups.forEach(pu => pu.draw());
         projectiles.forEach(p => p.draw());
         enemies.forEach(e => e.draw());
+        if (boss) boss.draw();
         players.forEach(p => p.draw());
     }
 }
@@ -908,5 +1331,6 @@ document.getElementById('btn-toggle-mode').addEventListener('click', () => {
 document.getElementById('btn-restart-pause').addEventListener('click', () => startGame(isCoop));
 document.getElementById('btn-to-menu'      ).addEventListener('click', goToMenu);
 document.getElementById('btn-restart'      ).addEventListener('click', () => startGame(isCoop));
+document.getElementById('btn-victory-menu' ).addEventListener('click', goToMenu);
 
 requestAnimationFrame(loop);

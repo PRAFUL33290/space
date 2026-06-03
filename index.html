@@ -20,6 +20,10 @@
             </div>
             <div id="center-stats">
                 <div id="level-display">LEVEL 1</div>
+                <div id="boss-bar-container" class="hidden">
+                    <div id="boss-name-display">BOSS</div>
+                    <div id="boss-hp-outer"><div id="boss-hp-inner"></div></div>
+                </div>
             </div>
             <div id="p2-stats" class="player-stats">
                 <div class="score" id="p2-score">000000</div>
@@ -67,6 +71,14 @@
             <h2>GAME OVER</h2>
             <p class="score-final">Score : <span id="final-score">0</span></p>
             <button id="btn-restart">↩ REJOUER</button>
+        </div>
+
+        <!-- Victory -->
+        <div id="victory" class="overlay hidden">
+            <h2 class="victory-title">VICTOIRE !</h2>
+            <p class="score-final">Score : <span id="victory-score">0</span></p>
+            <p class="victory-sub">Tous les niveaux complétés !</p>
+            <button id="btn-victory-menu">🏠 MENU PRINCIPAL</button>
         </div>
 
         <!-- Mobile Touch Controls -->

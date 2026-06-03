@@ -316,7 +316,9 @@ button:hover {
 
 #center-stats {
     display: flex;
-    align-items: flex-start;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
 }
 
 #level-display {
@@ -332,6 +334,56 @@ button:hover {
     letter-spacing: 1px;
     text-shadow: 0 0 6px currentColor;
     transition: color 0.2s;
+}
+
+/* Boss HP bar (HUD) */
+#boss-bar-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+
+#boss-bar-container.hidden { display: none; }
+
+#boss-name-display {
+    font-size: 8px;
+    color: #ff4444;
+    text-shadow: 0 0 8px #ff4444;
+    letter-spacing: 1px;
+    animation: bossNamePulse 0.9s ease-in-out infinite;
+}
+
+@keyframes bossNamePulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.6; }
+}
+
+#boss-hp-outer {
+    width: 160px;
+    height: 10px;
+    background: rgba(0,0,0,0.6);
+    border: 1px solid rgba(255,80,80,0.5);
+}
+
+#boss-hp-inner {
+    height: 100%;
+    width: 100%;
+    background: #ff3333;
+    box-shadow: 0 0 8px #ff3333;
+    transition: width 0.12s linear, background 0.3s;
+}
+
+/* Victory screen */
+.victory-title {
+    color: #ffd700 !important;
+    text-shadow: 0 0 14px #ffd700, 0 0 30px #ffd700 !important;
+}
+
+.victory-sub {
+    font-size: 9px;
+    color: #aaa;
+    margin-bottom: 28px;
 }
 
 /* ─── Mobile Touch Controls ─────────────────────────────────────────── */
