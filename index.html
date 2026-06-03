@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>STAR DEFENDERS</title>
     <link rel="stylesheet" href="style.css">
 </head>
@@ -46,7 +46,7 @@
                 <button id="btn-start">▶ 1 JOUEUR</button>
                 <button id="btn-coop">👥 COOPÉRATION</button>
             </div>
-            <p class="controls-info">P1 : ZQSD + Espace &nbsp;|&nbsp; P2 : Flèches + Entrée</p>
+            <p class="controls-info">P1 : ZQSD + Espace | Bouclier : E &nbsp;|&nbsp; P2 : Flèches + Entrée | Bouclier : Shift</p>
         </div>
 
         <!-- Menu Pause -->
@@ -67,6 +67,20 @@
             <h2>GAME OVER</h2>
             <p class="score-final">Score : <span id="final-score">0</span></p>
             <button id="btn-restart">↩ REJOUER</button>
+        </div>
+
+        <!-- Mobile Touch Controls -->
+        <div id="mobile-controls" class="mobile-only">
+            <div id="dpad">
+                <button class="dpad-btn" id="dpad-up" data-dir="up">▲</button>
+                <button class="dpad-btn" id="dpad-left" data-dir="left">◀</button>
+                <button class="dpad-btn" id="dpad-right" data-dir="right">▶</button>
+                <button class="dpad-btn" id="dpad-down" data-dir="down">▼</button>
+            </div>
+            <div id="action-buttons">
+                <button class="action-btn" id="btn-shield-mobile">🛡</button>
+                <button class="action-btn" id="btn-fire">🔥</button>
+            </div>
         </div>
     </div>
 
