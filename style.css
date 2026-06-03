@@ -205,3 +205,12 @@ button:hover {
     color: #fff;
     text-shadow: 0 0 5px #fff;
 }
+
+/* Indicateur de power-up actif */
+.power-status {
+    font-size: 8px;
+    min-height: 14px;
+    letter-spacing: 1px;
+    text-shadow: 0 0 6px currentColor;
+    transition: color 0.2s;
+}

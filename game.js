@@ -4,6 +4,10 @@
 const W = 800, H = 600;
 const S = { MENU: 0, PLAYING: 1, PAUSED: 2, OVER: 3 };
 
+const CHARGE_MED  = 0.35;  // seuil tir moyen (s)
+const CHARGE_FULL = 0.90;  // seuil tir plasma (s)
+const CHARGE_MAX  = 1.20;  // plafond de charge (s)
+
 // ─── Gestionnaire Audio ───────────────────────────────────────────────────────
 const AudioMgr = (() => {
     const tracks = {
@@ -12,9 +16,7 @@ const AudioMgr = (() => {
         raid:    new Audio('music/Neon Star Raid.mp3'),
     };
     Object.values(tracks).forEach(t => { t.loop = true; t.volume = 0.5; });
-
-    let current = null;
-    let muted   = false;
+    let current = null, muted = false;
 
     function play(name) {
         const t = tracks[name];
@@ -24,47 +26,37 @@ const AudioMgr = (() => {
         current.muted = muted;
         current.play().catch(() => {});
     }
-
     function pause()  { current?.pause(); }
     function resume() { current?.play().catch(() => {}); }
-
     function toggleMute() {
         muted = !muted;
         if (current) current.muted = muted;
         showMuteToast(muted);
-        return muted;
     }
-
-    // Musique de jeu selon le niveau sélectionné
     function gameTrack() { return selectedLevel <= 5 ? 'galactic' : 'raid'; }
-
     return { play, pause, resume, toggleMute, gameTrack };
 })();
 
-// Premier clic/touche → démarre la musique du menu (règle autoplay navigateur)
 document.addEventListener('click',   startMenuAudio, { once: true });
 document.addEventListener('keydown', startMenuAudio, { once: true });
 function startMenuAudio() { AudioMgr.play('menu'); }
 
-// Toast discret pour l'état mute
 let _toastTimer = null;
-function showMuteToast(muted) {
-    let toast = document.getElementById('mute-toast');
-    if (!toast) {
-        toast = document.createElement('div');
-        toast.id = 'mute-toast';
-        toast.style.cssText = `
-            position:absolute;bottom:14px;left:50%;transform:translateX(-50%);
-            background:rgba(0,0,0,0.75);color:#0ff;border:1px solid #0ff;
+function showMuteToast(m) {
+    let t = document.getElementById('mute-toast');
+    if (!t) {
+        t = document.createElement('div');
+        t.id = 'mute-toast';
+        t.style.cssText = `position:absolute;bottom:14px;left:50%;transform:translateX(-50%);
+            background:rgba(0,0,0,.75);color:#0ff;border:1px solid #0ff;
             font-family:'Press Start 2P',monospace;font-size:10px;
-            padding:7px 14px;z-index:20;pointer-events:none;letter-spacing:1px;
-        `;
-        document.getElementById('game-container').appendChild(toast);
+            padding:7px 14px;z-index:20;pointer-events:none;letter-spacing:1px;`;
+        document.getElementById('game-container').appendChild(t);
     }
-    toast.innerText = muted ? '🔇 SON COUPÉ' : '🔊 SON ACTIVÉ';
-    toast.style.opacity = '1';
+    t.innerText = m ? '🔇 SON COUPÉ' : '🔊 SON ACTIVÉ';
+    t.style.opacity = '1';
     clearTimeout(_toastTimer);
-    _toastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 1800);
+    _toastTimer = setTimeout(() => { t.style.opacity = '0'; }, 1800);
 }
 
 // ─── Canvas ───────────────────────────────────────────────────────────────────
@@ -97,8 +89,9 @@ let players     = [];
 let projectiles = [];
 let enemies     = [];
 let particles   = [];
+let powerups    = [];   // ← bonus à ramasser
 
-// ─── Étoiles parallaxe (3 couches) ───────────────────────────────────────────
+// ─── Étoiles parallaxe ────────────────────────────────────────────────────────
 const STAR_LAYERS = [
     { n: 80, spd: 18,  sz: 1,   a: 0.35 },
     { n: 50, spd: 55,  sz: 1.5, a: 0.60 },
@@ -111,30 +104,18 @@ const stars = STAR_LAYERS.flatMap(l =>
         sz: l.sz, a: l.a * (0.7 + Math.random() * 0.3),
     }))
 );
-
 function updateStars(dt) {
-    for (const s of stars) {
-        s.x -= s.spd * dt;
-        if (s.x < 0) { s.x = W; s.y = Math.random() * H; }
-    }
+    for (const s of stars) { s.x -= s.spd * dt; if (s.x < 0) { s.x = W; s.y = Math.random() * H; } }
 }
-
 function drawBg() {
-    ctx.fillStyle = '#020212';
-    ctx.fillRect(0, 0, W, H);
-    for (const s of stars) {
-        ctx.globalAlpha = s.a;
-        ctx.fillStyle = '#fff';
-        ctx.fillRect(s.x, s.y, s.sz, s.sz);
-    }
+    ctx.fillStyle = '#020212'; ctx.fillRect(0, 0, W, H);
+    for (const s of stars) { ctx.globalAlpha = s.a; ctx.fillStyle = '#fff'; ctx.fillRect(s.x, s.y, s.sz, s.sz); }
     ctx.globalAlpha = 1;
 }
 
 // ─── Entité de base ───────────────────────────────────────────────────────────
 class Entity {
-    constructor(x, y, w, h) {
-        this.x = x; this.y = y; this.w = w; this.h = h; this.active = true;
-    }
+    constructor(x, y, w, h) { this.x = x; this.y = y; this.w = w; this.h = h; this.active = true; }
     get r() { return Math.min(this.w, this.h) * 0.38; }
     hits(o) { return Math.hypot(this.x - o.x, this.y - o.y) < this.r + o.r; }
 }
@@ -149,43 +130,109 @@ class Player extends Entity {
         this.spd  = 280;
         this.lives = 5;
         this.score = 0;
-        this.cd   = 0;
-        this.rate  = 0.12;
-        this.invt  = 0; // secondes d'invincibilité
+        this.cd        = 0;        // cooldown après tir
+        this.invt      = 0;        // invincibilité après touche
+        // ── Charge ─────────────────────────────────────────────────────────
+        this.chargeTime = 0;       // durée du maintien du bouton tir
+        this.wasShoot   = false;   // état bouton au frame précédent
+        // ── Power-up actif ─────────────────────────────────────────────────
+        this.powerType  = null;    // 'surchauffe' | 'triple' | 'bouclier'
+        this.powerTime  = 0;       // secondes restantes
+        this.dmgMult    = 1;       // multiplicateur de dégâts
+        this.shield     = 0;       // bouclier : coups absorbés
     }
 
     update(dt) {
         if (!this.active) return;
         if (this.invt > 0) this.invt -= dt;
+        if (this.cd   > 0) this.cd   -= dt;
 
+        // Déplacements
         const c = this.ctrl;
         if (keys[c.up])    this.y -= this.spd * dt;
         if (keys[c.down])  this.y += this.spd * dt;
         if (keys[c.left])  this.x -= this.spd * dt;
         if (keys[c.right]) this.x += this.spd * dt;
+        this.x = Math.max(this.w/2, Math.min(W * 0.58, this.x));
+        this.y = Math.max(this.h/2, Math.min(H - this.h/2, this.y));
 
-        // Le joueur reste dans la zone gauche (58 % de l'écran)
-        this.x = Math.max(this.w / 2, Math.min(W * 0.58, this.x));
-        this.y = Math.max(this.h / 2, Math.min(H - this.h / 2, this.y));
-
-        this.cd -= dt;
-        if (keys[c.shoot] && this.cd <= 0) {
-            // Tir vers la DROITE (vx positif)
-            projectiles.push(new Shot(this.x + this.w / 2, this.y, 620, 0, this.col, true, this.id));
-            this.cd = this.rate;
+        // ── Logique de tir chargé ─────────────────────────────────────────
+        const shooting = !!keys[c.shoot];
+        if (shooting) {
+            this.chargeTime = Math.min(this.chargeTime + dt, CHARGE_MAX);
+        } else if (this.wasShoot && this.cd <= 0) {
+            // Bouton relâché → tir selon la charge accumulée
+            this._fireCharged();
+            this.chargeTime = 0;
+            this.cd = 0.1;
         }
+        this.wasShoot = shooting;
+
+        // ── Power-up timer ────────────────────────────────────────────────
+        if (this.powerTime > 0) {
+            this.powerTime -= dt;
+            if (this.powerTime <= 0) { this._clearPower(); }
+        }
+    }
+
+    _fireCharged() {
+        const x = this.x + this.w / 2;
+        const y = this.y;
+        const m = this.dmgMult;
+
+        if (this.chargeTime >= CHARGE_FULL) {
+            // ═══ PLASMA (tir pleine charge) : gros, pénétrant ═══
+            projectiles.push(new Shot(x, y, 640, 0, '#ff4400', true, this.id, 6 * m, true));
+            boom(x, y, '#ff8800', 8);
+        } else if (this.chargeTime >= CHARGE_MED) {
+            // ═══ TIR MOYEN ═══
+            projectiles.push(new Shot(x, y, 630, 0, '#ffaa00', true, this.id, 3 * m, false));
+        } else {
+            // ═══ TIR NORMAL (tap rapide) ═══
+            if (this.powerType === 'triple') {
+                // Triple shot : 3 projectiles en éventail
+                projectiles.push(new Shot(x, y, 630, -65, this.col, true, this.id, 1 * m));
+                projectiles.push(new Shot(x, y, 640,   0, this.col, true, this.id, 1 * m));
+                projectiles.push(new Shot(x, y, 630,  65, this.col, true, this.id, 1 * m));
+            } else {
+                projectiles.push(new Shot(x, y, 640, 0, this.col, true, this.id, 1 * m));
+            }
+        }
+    }
+
+    applyPower(type) {
+        this.powerType = type;
+        switch (type) {
+            case 'surchauffe': this.powerTime = 10; this.dmgMult = 2; break;
+            case 'triple':     this.powerTime = 12; break;
+            case 'bouclier':   this.shield = 3; this.powerTime = 30; break;
+        }
+        updatePowerHUD(this);
+    }
+
+    _clearPower() {
+        this.powerType = null; this.powerTime = 0;
+        this.dmgMult = 1;
+        if (this.shield > 0) this.shield = 0; // bouclier expire aussi
+        updatePowerHUD(this);
     }
 
     hit() {
         if (this.invt > 0) return;
+        if (this.shield > 0) {
+            // Le bouclier absorbe le coup
+            this.shield--;
+            this.invt = 0.5;
+            boom(this.x, this.y, '#4488ff', 10);
+            if (this.shield <= 0) this._clearPower();
+            else updatePowerHUD(this);
+            return;
+        }
         this.lives--;
         this.invt = 2.0;
         boom(this.x, this.y, this.col, 14);
         updateHUD();
-        if (this.lives <= 0) {
-            this.active = false;
-            boom(this.x, this.y, this.col, 35);
-        }
+        if (this.lives <= 0) { this.active = false; boom(this.x, this.y, this.col, 35); }
     }
 
     draw() {
@@ -196,38 +243,48 @@ class Player extends Entity {
         ctx.save();
         ctx.translate(x, y);
 
-        // Flamme moteur (côté gauche = arrière)
+        // ── Aura de bouclier ──────────────────────────────────────────────
+        if (this.shield > 0) {
+            const pulse = 0.6 + 0.4 * Math.sin(performance.now() * 0.006);
+            ctx.strokeStyle = `rgba(68,136,255,${pulse})`;
+            ctx.lineWidth = 2;
+            ctx.shadowBlur = 12; ctx.shadowColor = '#4488ff';
+            ctx.beginPath(); ctx.arc(0, 0, w * 0.7, 0, Math.PI * 2); ctx.stroke();
+        }
+
+        // ── Flamme moteur ─────────────────────────────────────────────────
         const fLen = 8 + Math.random() * 7;
-        ctx.fillStyle = `hsl(${25 + Math.random() * 20},100%,60%)`;
-        ctx.shadowBlur = 14; ctx.shadowColor = '#ff7700';
+        const flameCol = this.powerType === 'surchauffe' ? '#ff4400' : '#ff8800';
+        ctx.fillStyle = flameCol; ctx.shadowBlur = 14; ctx.shadowColor = flameCol;
         ctx.beginPath();
         ctx.moveTo(-w/2, -h/4); ctx.lineTo(-w/2 - fLen, 0); ctx.lineTo(-w/2, h/4);
         ctx.fill();
 
-        // Coque — vaisseau pointant vers la DROITE
-        ctx.fillStyle = col;
-        ctx.shadowBlur = 16; ctx.shadowColor = col;
+        // ── Coque ─────────────────────────────────────────────────────────
+        const hullCol = this.powerType === 'surchauffe'
+            ? `hsl(30,100%,${50 + Math.sin(performance.now()*0.01)*10}%)`
+            : col;
+        ctx.fillStyle = hullCol; ctx.shadowBlur = 16; ctx.shadowColor = hullCol;
         ctx.beginPath();
-        ctx.moveTo( w/2,   0);
-        ctx.lineTo( w/6,  -h/2);
-        ctx.lineTo(-w/3,  -h/2);
-        ctx.lineTo(-w/2,  -h/5);
-        ctx.lineTo(-w/2,   h/5);
-        ctx.lineTo(-w/3,   h/2);
-        ctx.lineTo( w/6,   h/2);
-        ctx.closePath();
-        ctx.fill();
+        ctx.moveTo( w/2,   0); ctx.lineTo( w/6,  -h/2); ctx.lineTo(-w/3,  -h/2);
+        ctx.lineTo(-w/2,  -h/5); ctx.lineTo(-w/2,   h/5);
+        ctx.lineTo(-w/3,   h/2); ctx.lineTo( w/6,   h/2); ctx.closePath(); ctx.fill();
 
-        // Bande décorative
-        ctx.fillStyle = 'rgba(0,0,0,0.28)';
-        ctx.fillRect(-w/4, -h/2, w/7, h);
+        ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.fillRect(-w/4, -h/2, w/7, h);
 
-        // Cockpit
-        ctx.fillStyle = 'rgba(140,210,255,0.82)';
-        ctx.shadowBlur = 5; ctx.shadowColor = '#88ccff';
-        ctx.beginPath();
-        ctx.ellipse(w/8, 0, w/5.5, h/4, 0, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.fillStyle = 'rgba(140,210,255,0.82)'; ctx.shadowBlur = 5; ctx.shadowColor = '#88ccff';
+        ctx.beginPath(); ctx.ellipse(w/8, 0, w/5.5, h/4, 0, 0, Math.PI*2); ctx.fill();
+
+        // ── Orbe de charge au nez du vaisseau ─────────────────────────────
+        if (this.chargeTime > 0.05 && keys[this.ctrl.shoot]) {
+            const ratio  = Math.min(this.chargeTime / CHARGE_MAX, 1);
+            const radius = 4 + ratio * 18;
+            const hue    = 60 - ratio * 60; // jaune → orange → rouge
+            const pulse  = 0.7 + 0.3 * Math.sin(performance.now() * 0.02);
+            ctx.shadowBlur = 20 * ratio; ctx.shadowColor = `hsl(${hue},100%,60%)`;
+            ctx.fillStyle = `hsla(${hue},100%,60%,${0.6 + 0.4 * pulse})`;
+            ctx.beginPath(); ctx.arc(w/2, 0, radius, 0, Math.PI * 2); ctx.fill();
+        }
 
         ctx.restore();
     }
@@ -235,36 +292,50 @@ class Player extends Entity {
 
 // ─── Projectile ───────────────────────────────────────────────────────────────
 class Shot extends Entity {
-    constructor(x, y, vx, vy, col, friendly, pid = null) {
-        super(x, y, friendly ? 18 : 12, 4);
+    constructor(x, y, vx, vy, col, friendly, pid = null, damage = 1, piercing = false) {
+        // Taille proportionnelle aux dégâts
+        const bw = friendly ? Math.min(8 + damage * 4, 38) : 12;
+        const bh = friendly ? Math.min(3 + damage,      8) : 4;
+        super(x, y, bw, bh);
         this.vx = vx; this.vy = vy;
-        this.col = col; this.friendly = friendly; this.pid = pid;
+        this.col      = col;
+        this.friendly = friendly;
+        this.pid      = pid;
+        this.damage   = damage;
+        this.piercing = piercing;
     }
 
     update(dt) {
-        this.x += this.vx * dt;
-        this.y += this.vy * dt;
-        if (this.x < -80 || this.x > W + 80 || this.y < -80 || this.y > H + 80)
-            this.active = false;
+        this.x += this.vx * dt; this.y += this.vy * dt;
+        if (this.x < -80 || this.x > W+80 || this.y < -80 || this.y > H+80) this.active = false;
     }
 
     draw() {
         ctx.save();
         ctx.translate(this.x, this.y);
-        ctx.shadowBlur = 9; ctx.shadowColor = this.col;
+        ctx.shadowBlur = this.piercing ? 18 : 9; ctx.shadowColor = this.col;
         ctx.fillStyle = this.col;
-        ctx.fillRect(-this.w/2, -this.h/2, this.w, this.h);
-        ctx.fillStyle = '#fff';
-        ctx.fillRect(-this.w/2 + 2, -1, this.w - 4, 2);
+
+        if (this.piercing) {
+            // Plasma : ellipse pulsante
+            const pulse = 0.85 + 0.15 * Math.sin(performance.now() * 0.025);
+            ctx.beginPath(); ctx.ellipse(0, 0, this.w/2 * pulse, this.h/2 * pulse, 0, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#fff'; ctx.shadowBlur = 5;
+            ctx.beginPath(); ctx.ellipse(0, 0, this.w/4, this.h/4, 0, 0, Math.PI*2); ctx.fill();
+        } else {
+            ctx.fillRect(-this.w/2, -this.h/2, this.w, this.h);
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(-this.w/2 + 2, -1, this.w - 4, 2);
+        }
         ctx.restore();
     }
 }
 
 // ─── Ennemis ──────────────────────────────────────────────────────────────────
 const EDEFS = {
-    scout:   { col: '#ff3333', maxHp: 1, val: 100, w: 26, h: 20, spd: 130, shoots: false },
-    fighter: { col: '#ff8800', maxHp: 3, val: 250, w: 32, h: 26, spd:  82, shoots: true  },
-    heavy:   { col: '#cc00ff', maxHp: 8, val: 600, w: 46, h: 38, spd:  50, shoots: true  },
+    scout:   { col: '#ff3333', maxHp: 1, val: 100, w: 26, h: 20, spd: 130, shoots: false, dropChance: 0.06 },
+    fighter: { col: '#ff8800', maxHp: 3, val: 250, w: 32, h: 26, spd:  82, shoots: true,  dropChance: 0.35 },
+    heavy:   { col: '#cc00ff', maxHp: 8, val: 600, w: 46, h: 38, spd:  50, shoots: true,  dropChance: 1.00 },
 };
 
 class Enemy extends Entity {
@@ -272,9 +343,7 @@ class Enemy extends Entity {
         const d = EDEFS[type];
         super(x, y, d.w, d.h);
         Object.assign(this, d);
-        this.type  = type;
-        this.hp    = d.maxHp;
-        // Vitesse négative → se déplace vers la GAUCHE
+        this.type  = type; this.hp = d.maxHp;
         this.vx    = -(d.spd + speedBonus + Math.random() * 30);
         this.vy    = (Math.random() - 0.5) * 70;
         this.phase = Math.random() * Math.PI * 2;
@@ -283,22 +352,15 @@ class Enemy extends Entity {
 
     update(dt) {
         this.x += this.vx * dt;
-
         if (this.type === 'fighter') {
             this.y += Math.sin(performance.now() * 0.0026 + this.phase) * 80 * dt;
         } else {
             this.y += this.vy * dt;
-            if (this.y < this.h/2 || this.y > H - this.h/2) this.vy *= -1;
+            if (this.y < this.h/2 || this.y > H-this.h/2) this.vy *= -1;
         }
-        this.y = Math.max(this.h/2, Math.min(H - this.h/2, this.y));
-
-        // Sort par le côté gauche → inactif
+        this.y = Math.max(this.h/2, Math.min(H-this.h/2, this.y));
         if (this.x < -80) this.active = false;
-
-        if (this.shoots) {
-            this.scd -= dt;
-            if (this.scd <= 0) { this._shoot(); this.scd = 1.8 + Math.random() * 2.5; }
-        }
+        if (this.shoots) { this.scd -= dt; if (this.scd <= 0) { this._shoot(); this.scd = 1.8 + Math.random() * 2.5; } }
     }
 
     _shoot() {
@@ -306,45 +368,84 @@ class Enemy extends Entity {
         if (!target) return;
         const ang = Math.atan2(target.y - this.y, target.x - this.x);
         const spd = this.type === 'heavy' ? 185 : 240;
-        projectiles.push(new Shot(this.x - this.w/2, this.y,
-            Math.cos(ang) * spd, Math.sin(ang) * spd, '#ff0055', false));
+        projectiles.push(new Shot(this.x - this.w/2, this.y, Math.cos(ang)*spd, Math.sin(ang)*spd, '#ff0055', false));
     }
 
     draw() {
         const { x, y, w, h, col, hp, maxHp } = this;
-        ctx.save();
-        ctx.translate(x, y);
-        ctx.fillStyle = col;
-        ctx.shadowBlur = 12; ctx.shadowColor = col;
-
-        // Coque — vaisseau ennemi pointant vers la GAUCHE
+        ctx.save(); ctx.translate(x, y);
+        ctx.fillStyle = col; ctx.shadowBlur = 12; ctx.shadowColor = col;
         ctx.beginPath();
-        ctx.moveTo(-w/2,  0);
-        ctx.lineTo(-w/6, -h/2);
-        ctx.lineTo( w/3, -h/2);
-        ctx.lineTo( w/2, -h/5);
-        ctx.lineTo( w/2,  h/5);
-        ctx.lineTo( w/3,  h/2);
-        ctx.lineTo(-w/6,  h/2);
-        ctx.closePath();
-        ctx.fill();
-
-        // Flamme moteur ennemi (côté droit = arrière)
-        ctx.fillStyle = '#ff5500';
-        ctx.shadowColor = '#ff5500'; ctx.shadowBlur = 8;
-        ctx.beginPath();
-        ctx.ellipse(w/2, 0, 5, h/4, 0, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Barre de vie pour les ennemis résistants
+        ctx.moveTo(-w/2, 0); ctx.lineTo(-w/6,-h/2); ctx.lineTo(w/3,-h/2);
+        ctx.lineTo(w/2,-h/5); ctx.lineTo(w/2,h/5); ctx.lineTo(w/3,h/2); ctx.lineTo(-w/6,h/2);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#ff5500'; ctx.shadowColor = '#ff5500'; ctx.shadowBlur = 8;
+        ctx.beginPath(); ctx.ellipse(w/2, 0, 5, h/4, 0, 0, Math.PI*2); ctx.fill();
         if (maxHp > 1) {
-            const bw = w * 0.9;
-            ctx.shadowBlur = 0;
-            ctx.fillStyle = 'rgba(0,0,0,0.6)';
-            ctx.fillRect(-bw/2, -h/2 - 9, bw, 4);
-            ctx.fillStyle = hp > maxHp / 2 ? '#33ff66' : '#ff4400';
-            ctx.fillRect(-bw/2, -h/2 - 9, bw * (hp / maxHp), 4);
+            const bw = w * 0.9; ctx.shadowBlur = 0;
+            ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(-bw/2, -h/2-9, bw, 4);
+            ctx.fillStyle = hp > maxHp/2 ? '#33ff66' : '#ff4400';
+            ctx.fillRect(-bw/2, -h/2-9, bw * (hp/maxHp), 4);
         }
+        ctx.restore();
+    }
+}
+
+// ─── Power-Up ─────────────────────────────────────────────────────────────────
+const PU_DEFS = {
+    surchauffe: { col: '#ff8800', label: '🔥', desc: 'SURCHAUFFE' },
+    triple:     { col: '#00ccff', label: '⚡', desc: 'TRIPLE TIR' },
+    bouclier:   { col: '#4488ff', label: '🛡', desc: 'BOUCLIER'   },
+};
+const PU_TYPES = Object.keys(PU_DEFS);
+
+class PowerUp extends Entity {
+    constructor(x, y) {
+        super(x, y, 22, 22);
+        this.type    = PU_TYPES[Math.floor(Math.random() * PU_TYPES.length)];
+        this.col     = PU_DEFS[this.type].col;
+        this.label   = PU_DEFS[this.type].label;
+        this.vx      = -55 - Math.random() * 20;
+        this.vy      = (Math.random() - 0.5) * 25;
+        this.age     = 0;
+        this.lifetime = 12; // disparaît après 12s
+    }
+
+    update(dt) {
+        this.x  += this.vx * dt;
+        this.y  += this.vy * dt;
+        this.age += dt;
+        if (this.y < this.h/2 || this.y > H-this.h/2) this.vy *= -1;
+        // Clignote et disparaît après lifetime - 2s
+        if (this.age > this.lifetime || this.x < -40) this.active = false;
+    }
+
+    draw() {
+        const blink = this.age > this.lifetime - 2 && Math.floor(this.age * 8) % 2 === 0;
+        if (blink) return;
+
+        const pulse = 0.8 + 0.2 * Math.sin(performance.now() * 0.007);
+        ctx.save();
+        ctx.translate(this.x, this.y);
+
+        // Hexagone animé
+        ctx.fillStyle = this.col;
+        ctx.shadowBlur = 16 * pulse; ctx.shadowColor = this.col;
+        ctx.globalAlpha = 0.85;
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+            const a = (i / 6) * Math.PI * 2 - Math.PI / 6;
+            i === 0 ? ctx.moveTo(Math.cos(a)*11, Math.sin(a)*11)
+                    : ctx.lineTo(Math.cos(a)*11, Math.sin(a)*11);
+        }
+        ctx.closePath(); ctx.fill();
+
+        // Icône
+        ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+        ctx.font = '12px serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(this.label, 0, 0);
+
         ctx.restore();
     }
 }
@@ -353,23 +454,19 @@ class Enemy extends Entity {
 class Particle {
     constructor(x, y, col) {
         this.x = x; this.y = y;
-        const ang = Math.random() * Math.PI * 2;
-        const spd = 40 + Math.random() * 230;
-        this.vx = Math.cos(ang) * spd; this.vy = Math.sin(ang) * spd;
-        this.col = col; this.life = 1; this.sz = 2 + Math.random() * 4;
-        this.active = true;
+        const ang = Math.random() * Math.PI * 2, spd = 40 + Math.random() * 230;
+        this.vx = Math.cos(ang)*spd; this.vy = Math.sin(ang)*spd;
+        this.col = col; this.life = 1; this.sz = 2 + Math.random() * 4; this.active = true;
     }
     update(dt) {
-        this.x += this.vx * dt; this.y += this.vy * dt;
+        this.x += this.vx*dt; this.y += this.vy*dt;
         this.vx *= 0.93; this.vy *= 0.93;
-        this.life -= dt * 2.2;
-        if (this.life <= 0) this.active = false;
+        this.life -= dt * 2.2; if (this.life <= 0) this.active = false;
     }
     draw() {
         ctx.globalAlpha = Math.max(0, this.life);
-        ctx.fillStyle = this.col;
-        ctx.shadowBlur = 5; ctx.shadowColor = this.col;
-        ctx.fillRect(this.x - this.sz/2, this.y - this.sz/2, this.sz, this.sz);
+        ctx.fillStyle = this.col; ctx.shadowBlur = 5; ctx.shadowColor = this.col;
+        ctx.fillRect(this.x-this.sz/2, this.y-this.sz/2, this.sz, this.sz);
         ctx.globalAlpha = 1; ctx.shadowBlur = 0;
     }
 }
@@ -397,9 +494,25 @@ const btnToggle = document.getElementById('btn-toggle-mode');
 
 function updateHUD() {
     players.forEach(p => {
-        (p.id === 1 ? p1ScEl : p2ScEl).innerText = String(p.score).padStart(6, '0');
-        (p.id === 1 ? p1LvEl : p2LvEl).innerText = '♥'.repeat(Math.max(0, p.lives)) || '☠';
+        (p.id===1 ? p1ScEl : p2ScEl).innerText = String(p.score).padStart(6,'0');
+        (p.id===1 ? p1LvEl : p2LvEl).innerText = '♥'.repeat(Math.max(0,p.lives)) || '☠';
+        updatePowerHUD(p);
     });
+}
+
+function updatePowerHUD(p) {
+    const el = document.getElementById(`p${p.id}-power`);
+    if (!el) return;
+    if (p.powerType && p.powerTime > 0) {
+        const d = PU_DEFS[p.powerType];
+        el.innerText = `${d.label} ${d.desc} ${Math.ceil(p.powerTime)}s`;
+        el.style.color = d.col;
+    } else if (p.shield > 0) {
+        el.innerText = `🛡 x${p.shield}`;
+        el.style.color = '#4488ff';
+    } else {
+        el.innerText = '';
+    }
 }
 
 function updateToggleBtn() {
@@ -409,70 +522,51 @@ function updateToggleBtn() {
 
 // ─── Pause / Reprise ──────────────────────────────────────────────────────────
 function pauseGame() {
-    state = S.PAUSED;
-    AudioMgr.pause();
+    state = S.PAUSED; AudioMgr.pause();
     const has2 = players.some(p => p.id === 2);
     pauseInfo.innerText = `NIVEAU ${level} · ${has2 ? '2 JOUEURS' : '1 JOUEUR'}`;
-    updateToggleBtn();
-    pauseEl.classList.remove('hidden');
+    updateToggleBtn(); pauseEl.classList.remove('hidden');
 }
 
 function resumeGame() {
-    state = S.PLAYING;
-    AudioMgr.resume();
-    lastTime = performance.now(); // évite un saut de temps après la pause
-    pauseEl.classList.add('hidden');
+    state = S.PLAYING; AudioMgr.resume();
+    lastTime = performance.now(); pauseEl.classList.add('hidden');
 }
 
 // ─── Démarrage ────────────────────────────────────────────────────────────────
 function startGame(coop) {
-    isCoop = coop;
-    level  = selectedLevel;
-
+    isCoop = coop; level = selectedLevel;
     players = [
-        new Player(80, coop ? H / 3 : H / 2, '#00ffaa',
-            { up: 'KeyW', down: 'KeyS', left: 'KeyA', right: 'KeyD', shoot: 'Space' }, 1)
+        new Player(80, coop ? H/3 : H/2, '#00ffaa',
+            { up:'KeyW', down:'KeyS', left:'KeyA', right:'KeyD', shoot:'Space' }, 1)
     ];
-    if (coop) {
-        players.push(
-            new Player(80, H * 2 / 3, '#ff00aa',
-                { up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight', shoot: 'Enter' }, 2)
-        );
-    }
-
-    projectiles = []; enemies = []; particles = [];
+    if (coop) players.push(
+        new Player(80, H*2/3, '#ff00aa',
+            { up:'ArrowUp', down:'ArrowDown', left:'ArrowLeft', right:'ArrowRight', shoot:'Enter' }, 2)
+    );
+    projectiles = []; enemies = []; particles = []; powerups = [];
     spawnTimer = 0;
-
-    menuEl.classList.add('hidden');
-    overEl.classList.add('hidden');
-    pauseEl.classList.add('hidden');
+    menuEl.classList.add('hidden'); overEl.classList.add('hidden'); pauseEl.classList.add('hidden');
     hudEl.classList.remove('hidden');
     p2Stats.style.display = coop ? '' : 'none';
     levelEl.innerText = `LEVEL ${level}`;
-
     updateHUD();
     AudioMgr.play(AudioMgr.gameTrack());
-    state = S.PLAYING;
-    lastTime = performance.now();
+    state = S.PLAYING; lastTime = performance.now();
 }
 
 function goToMenu() {
-    state = S.MENU;
-    players = []; enemies = []; projectiles = []; particles = [];
-    hudEl.classList.add('hidden');
-    pauseEl.classList.add('hidden');
-    overEl.classList.add('hidden');
-    menuEl.classList.remove('hidden');
+    state = S.MENU; players = []; enemies = []; projectiles = []; particles = []; powerups = [];
+    hudEl.classList.add('hidden'); pauseEl.classList.add('hidden');
+    overEl.classList.add('hidden'); menuEl.classList.remove('hidden');
     AudioMgr.play('menu');
 }
 
 function triggerGameOver() {
     state = S.OVER;
-    const total = players.reduce((s, p) => s + p.score, 0);
-    finalScEl.innerText = total.toLocaleString('fr-FR');
-    hudEl.classList.add('hidden');
-    overEl.classList.remove('hidden');
-    AudioMgr.play('menu'); // retour à la musique du menu sur Game Over
+    finalScEl.innerText = players.reduce((s,p)=>s+p.score,0).toLocaleString('fr-FR');
+    hudEl.classList.add('hidden'); overEl.classList.remove('hidden');
+    AudioMgr.play('menu');
 }
 
 // ─── Collisions ───────────────────────────────────────────────────────────────
@@ -481,20 +575,25 @@ function collide() {
     for (const proj of projectiles) {
         if (!proj.active || !proj.friendly) continue;
         for (const e of enemies) {
-            if (!e.active || !proj.active) continue;
+            if (!e.active) continue;
             if (proj.hits(e)) {
-                proj.active = false;
-                boom(proj.x, proj.y, proj.col, 5);
-                e.hp--;
+                boom(proj.x, proj.y, proj.col, proj.damage > 1 ? 8 : 4);
+                if (!proj.piercing) proj.active = false;
+                e.hp -= proj.damage;
                 if (e.hp <= 0) {
                     e.active = false;
                     boom(e.x, e.y, e.col, 22);
                     const shooter = players.find(p => p.id === proj.pid);
                     if (shooter) { shooter.score += e.val; updateHUD(); }
+                    // Drop power-up selon la chance
+                    if (Math.random() < e.dropChance)
+                        powerups.push(new PowerUp(e.x, e.y));
                 }
+                if (!proj.active) break;
             }
         }
     }
+
     // Tirs / corps ennemis → joueurs
     for (const player of players) {
         if (!player.active || player.invt > 0) continue;
@@ -504,32 +603,47 @@ function collide() {
         }
         for (const e of enemies) {
             if (!e.active) continue;
-            if (e.hits(player)) { e.active = false; boom(e.x, e.y, e.col, 18); player.hit(); }
+            if (e.hits(player)) { e.active = false; boom(e.x,e.y,e.col,18); player.hit(); }
+        }
+        // Collecte de power-up
+        for (const pu of powerups) {
+            if (!pu.active) continue;
+            if (pu.hits(player)) { pu.active = false; player.applyPower(pu.type); showPowerToast(pu); }
         }
     }
+
     if (players.every(p => !p.active)) triggerGameOver();
 }
 
-// ─── Apparition des ennemis depuis la DROITE ──────────────────────────────────
+function showPowerToast(pu) {
+    let t = document.getElementById('power-toast');
+    if (!t) {
+        t = document.createElement('div'); t.id = 'power-toast';
+        t.style.cssText = `position:absolute;top:60px;left:50%;transform:translateX(-50%);
+            background:rgba(0,0,0,.8);border:1px solid currentColor;
+            font-family:'Press Start 2P',monospace;font-size:11px;
+            padding:8px 16px;z-index:20;pointer-events:none;letter-spacing:1px;transition:opacity .4s;`;
+        document.getElementById('game-container').appendChild(t);
+    }
+    const d = PU_DEFS[pu.type];
+    t.style.color = d.col; t.style.borderColor = d.col;
+    t.innerText = `${d.label} ${d.desc} !`;
+    t.style.opacity = '1';
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => { t.style.opacity = '0'; }, 2000);
+}
+
+// ─── Spawn ennemis depuis la DROITE ───────────────────────────────────────────
 function spawnEnemies(dt) {
-    spawnTimer -= dt;
-    if (spawnTimer > 0) return;
-
-    const y = 40 + Math.random() * (H - 80);
-    const r = Math.random();
-
-    // Les niveaux élevés augmentent la proportion d'ennemis lourds
-    const heavyCut   = Math.max(0.75, 0.95 - level * 0.025);
-    const fighterCut = Math.max(0.45, 0.72 - level * 0.02);
-    const type = r > heavyCut ? 'heavy' : r > fighterCut ? 'fighter' : 'scout';
-
-    // Vitesse croissante par niveau
-    const speedBonus = (level - 1) * 12;
-    enemies.push(new Enemy(W + 40, y, type, speedBonus));
-
-    // Intervalle décroissant par niveau
-    const base = Math.max(0.35, 0.88 - (level - 1) * 0.05);
-    spawnTimer = type === 'scout' ? base : type === 'fighter' ? base * 2 : base * 4.2;
+    spawnTimer -= dt; if (spawnTimer > 0) return;
+    const y = 40 + Math.random() * (H - 80), r = Math.random();
+    const heavyCut = Math.max(0.75, 0.95 - level*0.025);
+    const fightCut = Math.max(0.45, 0.72 - level*0.02);
+    const type = r > heavyCut ? 'heavy' : r > fightCut ? 'fighter' : 'scout';
+    const speedBonus = (level-1) * 12;
+    enemies.push(new Enemy(W+40, y, type, speedBonus));
+    const base = Math.max(0.35, 0.88 - (level-1)*0.05);
+    spawnTimer = type==='scout' ? base : type==='fighter' ? base*2 : base*4.2;
 }
 
 // ─── Boucle principale ────────────────────────────────────────────────────────
@@ -540,23 +654,23 @@ function update(dt) {
         projectiles.forEach(p => p.update(dt));
         enemies.forEach(e => e.update(dt));
         particles.forEach(p => p.update(dt));
+        powerups.forEach(pu => pu.update(dt));
         collide();
         spawnEnemies(dt);
         projectiles = projectiles.filter(p => p.active);
         enemies     = enemies.filter(e => e.active);
         particles   = particles.filter(p => p.active);
+        powerups    = powerups.filter(pu => pu.active);
     } else if (state !== S.PAUSED) {
-        // Menu et Game Over : fond étoilé animé
         updateStars(dt);
     }
-    // PAUSED : rien ne bouge, jeu figé
 }
 
 function draw() {
     drawBg();
-    // Dessine le jeu aussi en pause (derrière l'overlay semi-transparent)
     if (state === S.PLAYING || state === S.PAUSED) {
         particles.forEach(p => p.draw());
+        powerups.forEach(pu => pu.draw());
         projectiles.forEach(p => p.draw());
         enemies.forEach(e => e.draw());
         players.forEach(p => p.draw());
@@ -565,57 +679,32 @@ function draw() {
 
 function loop(ts) {
     const dt = Math.min((ts - lastTime) / 1000, 0.05);
-    lastTime = ts;
-    update(dt);
-    draw();
+    lastTime = ts; update(dt); draw();
     requestAnimationFrame(loop);
 }
 
 // ─── Boutons ──────────────────────────────────────────────────────────────────
-
-// Sélecteur de niveau (menu principal)
-document.getElementById('btn-lvl-down').addEventListener('click', () => {
-    selectedLevel = Math.max(1, selectedLevel - 1);
-    lvlNumEl.innerText = selectedLevel;
-});
-document.getElementById('btn-lvl-up').addEventListener('click', () => {
-    selectedLevel = Math.min(10, selectedLevel + 1);
-    lvlNumEl.innerText = selectedLevel;
-});
-
-// Menu principal
-document.getElementById('btn-start').addEventListener('click', () => startGame(false));
-document.getElementById('btn-coop').addEventListener('click',  () => startGame(true));
-
-// Pause
-document.getElementById('btn-resume').addEventListener('click', resumeGame);
+document.getElementById('btn-lvl-down').addEventListener('click', () => { selectedLevel = Math.max(1,  selectedLevel-1); lvlNumEl.innerText = selectedLevel; });
+document.getElementById('btn-lvl-up'  ).addEventListener('click', () => { selectedLevel = Math.min(10, selectedLevel+1); lvlNumEl.innerText = selectedLevel; });
+document.getElementById('btn-start'   ).addEventListener('click', () => startGame(false));
+document.getElementById('btn-coop'    ).addEventListener('click', () => startGame(true));
+document.getElementById('btn-resume'  ).addEventListener('click', resumeGame);
 
 document.getElementById('btn-toggle-mode').addEventListener('click', () => {
     const idx = players.findIndex(p => p.id === 2);
-    if (idx >= 0) {
-        // Retirer P2
-        players.splice(idx, 1);
-        isCoop = false;
-        p2Stats.style.display = 'none';
-    } else {
-        // Ajouter P2 à tout moment
-        const p2 = new Player(80, H * 2 / 3, '#ff00aa',
-            { up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight', shoot: 'Enter' }, 2);
-        players.push(p2);
-        isCoop = true;
-        p2Stats.style.display = '';
-        updateHUD();
+    if (idx >= 0) { players.splice(idx,1); isCoop=false; p2Stats.style.display='none'; }
+    else {
+        const p2 = new Player(80, H*2/3, '#ff00aa',
+            { up:'ArrowUp',down:'ArrowDown',left:'ArrowLeft',right:'ArrowRight',shoot:'Enter' }, 2);
+        players.push(p2); isCoop=true; p2Stats.style.display=''; updateHUD();
     }
-    const has2 = players.some(p => p.id === 2);
-    pauseInfo.innerText = `NIVEAU ${level} · ${has2 ? '2 JOUEURS' : '1 JOUEUR'}`;
+    const has2 = players.some(p=>p.id===2);
+    pauseInfo.innerText = `NIVEAU ${level} · ${has2?'2 JOUEURS':'1 JOUEUR'}`;
     updateToggleBtn();
 });
 
 document.getElementById('btn-restart-pause').addEventListener('click', () => startGame(isCoop));
-document.getElementById('btn-to-menu').addEventListener('click', goToMenu);
+document.getElementById('btn-to-menu'      ).addEventListener('click', goToMenu);
+document.getElementById('btn-restart'      ).addEventListener('click', () => startGame(isCoop));
 
-// Game Over
-document.getElementById('btn-restart').addEventListener('click', () => startGame(isCoop));
-
-// Lancement
 requestAnimationFrame(loop);
