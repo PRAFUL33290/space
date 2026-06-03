@@ -59,6 +59,118 @@ function showMuteToast(m) {
     _toastTimer = setTimeout(() => { t.style.opacity = '0'; }, 1800);
 }
 
+// ─── Sound FX (Web Audio API) ─────────────────────────────────────────────────
+const SFX = (() => {
+    let actx = null;
+    function getCtx() {
+        if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+        if (actx.state === 'suspended') actx.resume();
+        return actx;
+    }
+
+    function shoot(type) {
+        // type: 'normal', 'medium', 'plasma'
+        const ctx = getCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        const now = ctx.currentTime;
+
+        if (type === 'plasma') {
+            osc.type = 'sawtooth'; osc.frequency.setValueAtTime(220, now);
+            osc.frequency.exponentialRampToValueAtTime(55, now + 0.35);
+            gain.gain.setValueAtTime(0.25, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+            osc.start(now); osc.stop(now + 0.35);
+        } else if (type === 'medium') {
+            osc.type = 'square'; osc.frequency.setValueAtTime(600, now);
+            osc.frequency.exponentialRampToValueAtTime(200, now + 0.15);
+            gain.gain.setValueAtTime(0.15, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+            osc.start(now); osc.stop(now + 0.15);
+        } else {
+            osc.type = 'square'; osc.frequency.setValueAtTime(880, now);
+            osc.frequency.exponentialRampToValueAtTime(440, now + 0.08);
+            gain.gain.setValueAtTime(0.1, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+            osc.start(now); osc.stop(now + 0.08);
+        }
+    }
+
+    function impact() {
+        const ctx = getCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        const now = ctx.currentTime;
+        osc.type = 'sine'; osc.frequency.setValueAtTime(300, now);
+        osc.frequency.exponentialRampToValueAtTime(80, now + 0.12);
+        gain.gain.setValueAtTime(0.2, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+        osc.start(now); osc.stop(now + 0.12);
+    }
+
+    function enemyDestroyed() {
+        const ctx = getCtx();
+        // Noise burst for explosion
+        const bufferSize = ctx.sampleRate * 0.2;
+        const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+        const noise = ctx.createBufferSource();
+        noise.buffer = buffer;
+        const gain = ctx.createGain();
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'lowpass'; filter.frequency.setValueAtTime(1200, ctx.currentTime);
+        filter.frequency.exponentialRampToValueAtTime(200, ctx.currentTime + 0.2);
+        noise.connect(filter); filter.connect(gain); gain.connect(ctx.destination);
+        gain.gain.setValueAtTime(0.25, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+        noise.start(); noise.stop(ctx.currentTime + 0.2);
+    }
+
+    function playerHit() {
+        const ctx = getCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        const now = ctx.currentTime;
+        osc.type = 'sawtooth'; osc.frequency.setValueAtTime(150, now);
+        osc.frequency.exponentialRampToValueAtTime(40, now + 0.3);
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+        osc.start(now); osc.stop(now + 0.3);
+
+        // Add a second noise layer
+        const bufferSize = ctx.sampleRate * 0.25;
+        const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+        const noise = ctx.createBufferSource();
+        noise.buffer = buffer;
+        const g2 = ctx.createGain();
+        noise.connect(g2); g2.connect(ctx.destination);
+        g2.gain.setValueAtTime(0.2, now);
+        g2.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+        noise.start(now); noise.stop(now + 0.25);
+    }
+
+    function powerUp() {
+        const ctx = getCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        const now = ctx.currentTime;
+        osc.type = 'sine'; osc.frequency.setValueAtTime(400, now);
+        osc.frequency.exponentialRampToValueAtTime(1200, now + 0.15);
+        gain.gain.setValueAtTime(0.15, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+        osc.start(now); osc.stop(now + 0.2);
+    }
+
+    return { shoot, impact, enemyDestroyed, playerHit, powerUp };
+})();
+
 // ─── Canvas ───────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('gameCanvas');
 const ctx    = canvas.getContext('2d');
@@ -184,9 +296,11 @@ class Player extends Entity {
             // ═══ PLASMA (tir pleine charge) : gros, pénétrant ═══
             projectiles.push(new Shot(x, y, 640, 0, '#ff4400', true, this.id, 6 * m, true));
             boom(x, y, '#ff8800', 8);
+            SFX.shoot('plasma');
         } else if (this.chargeTime >= CHARGE_MED) {
             // ═══ TIR MOYEN ═══
             projectiles.push(new Shot(x, y, 630, 0, '#ffaa00', true, this.id, 3 * m, false));
+            SFX.shoot('medium');
         } else {
             // ═══ TIR NORMAL (tap rapide) ═══
             if (this.powerType === 'triple') {
@@ -197,6 +311,7 @@ class Player extends Entity {
             } else {
                 projectiles.push(new Shot(x, y, 640, 0, this.col, true, this.id, 1 * m));
             }
+            SFX.shoot('normal');
         }
     }
 
@@ -224,6 +339,7 @@ class Player extends Entity {
             this.shield--;
             this.invt = 0.5;
             boom(this.x, this.y, '#4488ff', 10);
+            SFX.impact();
             if (this.shield <= 0) this._clearPower();
             else updatePowerHUD(this);
             return;
@@ -231,6 +347,7 @@ class Player extends Entity {
         this.lives--;
         this.invt = 2.0;
         boom(this.x, this.y, this.col, 14);
+        SFX.playerHit();
         updateHUD();
         if (this.lives <= 0) { this.active = false; boom(this.x, this.y, this.col, 35); }
     }
@@ -583,11 +700,14 @@ function collide() {
                 if (e.hp <= 0) {
                     e.active = false;
                     boom(e.x, e.y, e.col, 22);
+                    SFX.enemyDestroyed();
                     const shooter = players.find(p => p.id === proj.pid);
                     if (shooter) { shooter.score += e.val; updateHUD(); }
                     // Drop power-up selon la chance
                     if (Math.random() < e.dropChance)
                         powerups.push(new PowerUp(e.x, e.y));
+                } else {
+                    SFX.impact();
                 }
                 if (!proj.active) break;
             }
@@ -608,7 +728,7 @@ function collide() {
         // Collecte de power-up
         for (const pu of powerups) {
             if (!pu.active) continue;
-            if (pu.hits(player)) { pu.active = false; player.applyPower(pu.type); showPowerToast(pu); }
+            if (pu.hits(player)) { pu.active = false; player.applyPower(pu.type); showPowerToast(pu); SFX.powerUp(); }
         }
     }
 
