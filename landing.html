@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Star Defenders — Accueil</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap">
+    <link rel="stylesheet" href="landing.css">
+</head>
+<body>
+
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-logo">
+            <span class="logo-star">★</span> STAR DEFENDERS
+        </div>
+        <ul class="nav-links">
+            <li><a href="#hero">Accueil</a></li>
+            <li><a href="#features">Fonctionnalités</a></li>
+            <li><a href="#how-to-play">Comment jouer</a></li>
+            <li><a href="index.html" class="btn-nav">Jouer</a></li>
+        </ul>
+        <button class="hamburger" id="hamburger" aria-label="Menu">
+            <span></span><span></span><span></span>
+        </button>
+    </nav>
+
+    <!-- Hero -->
+    <section id="hero" class="hero">
+        <div class="stars-bg" id="stars"></div>
+        <div class="hero-content">
+            <p class="hero-tag">Arcade Spatial</p>
+            <h1 class="hero-title">
+                <span class="line1">STAR</span>
+                <span class="line2">DEFENDERS</span>
+            </h1>
+            <p class="hero-sub">Défendez la galaxie. Survivez aux vagues ennemies.<br>Affrontez des boss légendaires.</p>
+            <div class="hero-buttons">
+                <a href="index.html" class="btn-primary">▶ Jouer maintenant</a>
+                <a href="#features" class="btn-secondary">Découvrir</a>
+            </div>
+            <div class="hero-stats">
+                <div class="stat"><span class="stat-val">10+</span><span class="stat-label">Niveaux</span></div>
+                <div class="stat-sep"></div>
+                <div class="stat"><span class="stat-val">2</span><span class="stat-label">Joueurs</span></div>
+                <div class="stat-sep"></div>
+                <div class="stat"><span class="stat-val">∞</span><span class="stat-label">Rejouabilité</span></div>
+            </div>
+        </div>
+        <div class="hero-ship" aria-hidden="true">
+            <div class="ship">🚀</div>
+            <div class="exhaust"></div>
+        </div>
+        <div class="scroll-hint">
+            <span>↓</span>
+        </div>
+    </section>
+
+    <!-- Features -->
+    <section id="features" class="features">
+        <div class="section-header">
+            <p class="section-tag">POURQUOI JOUER ?</p>
+            <h2>Des fonctionnalités <span class="accent">épiques</span></h2>
+        </div>
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">👾</div>
+                <h3>Vagues ennemies</h3>
+                <p>Des formations d'ennemis toujours plus dangereuses et imprévisibles à chaque niveau.</p>
+            </div>
+            <div class="feature-card featured">
+                <div class="feature-badge">HOT</div>
+                <div class="feature-icon">🤝</div>
+                <h3>Mode coopération</h3>
+                <p>Jouez à deux sur le même clavier et combinez vos forces pour vaincre les boss.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🛡️</div>
+                <h3>Bouclier tactique</h3>
+                <p>Activez votre bouclier au bon moment pour dévier les tirs ennemis et contre-attaquer.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">⚡</div>
+                <h3>Power-ups</h3>
+                <p>Collectez des améliorations pour décupler votre puissance de feu et vos capacités.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">👑</div>
+                <h3>Boss légendaires</h3>
+                <p>Chaque niveau se termine par un affrontement épique contre un boss aux patterns uniques.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📱</div>
+                <h3>Mobile ready</h3>
+                <p>Contrôles tactiles intégrés pour jouer aussi bien sur smartphone que sur ordinateur.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- How to play -->
+    <section id="how-to-play" class="how-to-play">
+        <div class="section-header">
+            <p class="section-tag">PRISE EN MAIN</p>
+            <h2>Comment <span class="accent">jouer</span></h2>
+        </div>
+        <div class="controls-wrapper">
+            <div class="player-card p1">
+                <div class="player-badge">JOUEUR 1</div>
+                <div class="control-group">
+                    <div class="keys-display">
+                        <div class="key-row"><kbd>Z</kbd></div>
+                        <div class="key-row"><kbd>Q</kbd><kbd>S</kbd><kbd>D</kbd></div>
+                    </div>
+                    <p>Déplacement</p>
+                </div>
+                <div class="control-group">
+                    <kbd class="key-wide">Espace</kbd>
+                    <p>Tirer</p>
+                </div>
+                <div class="control-group">
+                    <kbd>E</kbd>
+                    <p>Bouclier</p>
+                </div>
+            </div>
+
+            <div class="vs-divider">VS</div>
+
+            <div class="player-card p2">
+                <div class="player-badge">JOUEUR 2</div>
+                <div class="control-group">
+                    <div class="keys-display">
+                        <div class="key-row"><kbd>↑</kbd></div>
+                        <div class="key-row"><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd></div>
+                    </div>
+                    <p>Déplacement</p>
+                </div>
+                <div class="control-group">
+                    <kbd class="key-wide">Entrée</kbd>
+                    <p>Tirer</p>
+                </div>
+                <div class="control-group">
+                    <kbd>Shift</kbd>
+                    <p>Bouclier</p>
+                </div>
+            </div>
+        </div>
+        <p class="pause-tip">⏸ Appuyez sur <kbd>Échap</kbd> ou <kbd>P</kbd> pour mettre le jeu en pause</p>
+    </section>
+
+    <!-- CTA -->
+    <section class="cta">
+        <div class="cta-glow"></div>
+        <div class="cta-content">
+            <h2>Prêt à défendre la galaxie ?</h2>
+            <p>Choisissez votre niveau, invoquez un allié et partez au combat !</p>
+            <a href="index.html" class="btn-primary btn-large">▶ Lancer le jeu</a>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <p class="footer-logo"><span class="logo-star">★</span> STAR DEFENDERS</p>
+        <p class="footer-copy">Fait avec passion · Propulsé par HTML5 Canvas</p>
+    </footer>
+
+    <script>
+        // Generate star field
+        const starsContainer = document.getElementById('stars');
+        for (let i = 0; i < 150; i++) {
+            const star = document.createElement('div');
+            star.className = 'star';
+            star.style.cssText = `
+                left: ${Math.random() * 100}%;
+                top: ${Math.random() * 100}%;
+                width: ${Math.random() * 3 + 1}px;
+                height: ${Math.random() * 3 + 1}px;
+                animation-delay: ${Math.random() * 4}s;
+                animation-duration: ${Math.random() * 3 + 2}s;
+            `;
+            starsContainer.appendChild(star);
+        }
+
+        // Hamburger menu
+        const hamburger = document.getElementById('hamburger');
+        const navLinks = document.querySelector('.nav-links');
+        hamburger.addEventListener('click', () => {
+            navLinks.classList.toggle('open');
+            hamburger.classList.toggle('active');
+        });
+
+        // Smooth reveal on scroll
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(e => {
+                if (e.isIntersecting) e.target.classList.add('visible');
+            });
+        }, { threshold: 0.15 });
+        document.querySelectorAll('.feature-card, .player-card, .cta-content').forEach(el => observer.observe(el));
+    </script>
+</body>
+</html>
